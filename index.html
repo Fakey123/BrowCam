@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Camera 1× / 0.5×</title>
+
+<style>
+  :root {
+    --bg: #000;
+    --glass: rgba(24, 24, 26, 0.55);
+    --glass-border: rgba(255, 255, 255, 0.14);
+    --text: #f4f4f5;
+    --muted: rgba(244, 244, 245, 0.62);
+    --accent: #ffd60a;
+    --danger: #ff6b5e;
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    overflow: hidden;
+    overscroll-behavior: none;
+    touch-action: manipulation;
+  }
+
+  .app {
+    position: fixed;
+    inset: 0;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    background: #000;
+  }
+
+  /* ---------- Viewfinder ---------- */
+  .viewfinder {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    background: #0a0a0b;
+  }
+
+  video {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: opacity 0.18s ease, filter 0.18s ease, transform 0.35s cubic-bezier(.2,.8,.2,1);
+  }
+  /* brief dip while the lens changes */
+  video.switching { opacity: 0.25; filter: blur(14px); transform: scale(1.04); }
+
+  /* ---------- Top bar ---------- */
+  .topbar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    padding: calc(var(--safe-top) + 14px) 16px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    pointer-events: none;
+  }
+  .topbar > * { pointer-events: auto; }
+
+  .lens-chip {
+    background: var(--glass);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    border-radius: 999px;
+    padding: 7px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    font-variant-numeric: tabular-nums;
+    max-width: 70%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .lens-chip small { font-weight: 500; color: var(--muted); margin-left: 6px; }
+
+  .icon-btn {
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    border: 1px solid var(--glass-border);
+    background: var(--glass);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    color: var(--text);
+    display: grid; place-items: center;
+    cursor: pointer;
+    padding: 0;
+  }
+  .icon-btn svg { width: 18px; height: 18px; }
+
+  /* ---------- Toast ---------- */
+  .toast {
+    position: absolute;
+    left: 50%;
+    top: calc(var(--safe-top) + 64px);
+    transform: translate(-50%, -8px);
+    background: rgba(20, 20, 22, 0.82);
+    border: 1px solid var(--glass-border);
+    border-radius: 14px;
+    padding: 10px 14px;
+    font-size: 13px;
+    line-height: 1.35;
+    max-width: min(88vw, 360px);
+    text-align: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .toast.error { border-color: var(--danger); }
+
+  /* ---------- Zoom controls ---------- */
+  .zoom-dock {
+    position: absolute;
+    left: 0; right: 0;
+    bottom: 18px;
+    display: flex;
+    justify-content: center;
+  }
+
+  .zoom-pills {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px;
+    border-radius: 999px;
+    background: var(--glass);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+  }
+
+  .zoom-btn {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    min-width: 40px; height: 40px;
+    padding: 0 12px;
+    border-radius: 999px;
+    cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    transition: background 0.2s ease, color 0.2s ease, min-width 0.25s ease;
+  }
+  .zoom-btn svg { width: 16px; height: 16px; }
+  .zoom-btn[aria-pressed="true"] {
+    background: rgba(0, 0, 0, 0.55);
+    color: var(--accent);
+    min-width: 54px;
+  }
+  .zoom-btn:disabled { opacity: 0.4; cursor: default; }
+  .zoom-btn:focus-visible, .icon-btn:focus-visible, .shutter:focus-visible, .start-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* ---------- Bottom bar ---------- */
+  .bottombar {
+    background: #000;
+    padding: 18px 28px calc(var(--safe-bottom) + 18px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .shutter {
+    width: 72px; height: 72px;
+    border-radius: 50%;
+    border: 4px solid #fff;
+    background: transparent;
+    padding: 0;
+    cursor: pointer;
+    position: relative;
+  }
+  .shutter::after {
+    content: "";
+    position: absolute;
+    inset: 4px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.12s ease;
+  }
+  .shutter:active::after { transform: scale(0.88); }
+  .shutter:disabled { opacity: 0.35; }
+
+  .flash {
+    position: absolute; inset: 0;
+    background: #fff;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .flash.go { animation: flash 0.28s ease-out; }
+  @keyframes flash { 0% { opacity: 0.85; } 100% { opacity: 0; } }
+
+  /* ---------- Start screen ---------- */
+  .start {
+    position: absolute; inset: 0;
+    z-index: 5;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 14px;
+    padding: 32px;
+    text-align: center;
+    background: radial-gradient(120% 90% at 50% 0%, #1b1c20 0%, #08080a 70%);
+  }
+  .start.hidden { display: none; }
+  .start h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.01em; }
+  .start p { margin: 0; max-width: 32ch; color: var(--muted); font-size: 15px; line-height: 1.5; }
+  .start-btn {
+    margin-top: 10px;
+    border: 0;
+    background: var(--accent);
+    color: #1a1500;
+    font: inherit; font-size: 16px; font-weight: 700;
+    padding: 14px 28px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .start-btn:disabled { opacity: 0.6; }
+  .start .err { color: var(--danger); font-size: 14px; max-width: 34ch; min-height: 1.2em; }
+
+  /* ---------- Details sheet ---------- */
+  .sheet {
+    position: absolute;
+    left: 12px; right: 12px;
+    top: calc(var(--safe-top) + 64px);
+    max-height: 55%;
+    overflow: auto;
+    background: rgba(16, 16, 18, 0.92);
+    border: 1px solid var(--glass-border);
+    border-radius: 16px;
+    padding: 14px 16px;
+    font-size: 12.5px;
+    line-height: 1.5;
+    display: none;
+    z-index: 4;
+  }
+  .sheet.open { display: block; }
+  .sheet h2 { margin: 0 0 8px; font-size: 14px; }
+  .sheet ul { margin: 0; padding-left: 18px; }
+  .sheet li { margin-bottom: 4px; word-break: break-word; }
+  .sheet .tag { color: var(--accent); font-weight: 600; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+</head>
+
+<body>
+<div class="app">
+
+  <div class="viewfinder" id="viewfinder">
+    <video id="video" autoplay playsinline muted></video>
+    <div class="flash" id="flash"></div>
+
+    <div class="topbar">
+      <div class="lens-chip" id="lensChip">Camera off</div>
+      <button class="icon-btn" id="infoBtn" aria-label="Show camera details" aria-expanded="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
+      </button>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <div class="sheet" id="sheet" aria-label="Camera details"></div>
+
+    <div class="zoom-dock">
+      <div class="zoom-pills" role="group" aria-label="Zoom">
+        <button class="zoom-btn" id="zoomOut" aria-pressed="false" aria-label="Zoom out to 0.5x ultra-wide" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14"/></svg>
+          0.5×
+        </button>
+        <button class="zoom-btn" id="zoomOne" aria-pressed="true" aria-label="Normal 1x wide" disabled>1×</button>
+      </div>
+    </div>
+
+    <div class="start" id="start">
+      <h1>Wide and ultra-wide</h1>
+      <p>Opens at 1× on the main camera. Tap 0.5× to switch to the ultra-wide lens.</p>
+      <button class="start-btn" id="startBtn">Open camera</button>
+      <div class="err" id="startErr" role="alert"></div>
+    </div>
+  </div>
+
+  <div class="bottombar">
+    <button class="shutter" id="shutter" aria-label="Take photo" disabled></button>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  /* ------------------------------------------------------------------
+   * How the 0.5× switch works
+   * ------------------------------------------------------------------
+   * Browsers can't ask for "the ultra-wide lens" directly, so three
+   * approaches are tried in order:
+   *
+   *  A. Hardware zoom  - if the active camera track reports a zoom range
+   *     that reaches 0.5 (logical multi-camera, e.g. iOS Safari "Triple
+   *     Camera", some Android Chrome builds), apply zoom = 0.5.
+   *  B. Named lens     - look for a camera whose label says "Ultra Wide"
+   *     (iOS Safari: "Back Ultra Wide Camera") and switch to that device.
+   *  C. Probe          - on Android, labels are generic ("camera2 2, facing
+   *     back"). Try the other back cameras and pick the likeliest
+   *     ultra-wide (fixed-focus lenses are scored higher).
+   * ------------------------------------------------------------------ */
+
+  const $ = (id) => document.getElementById(id);
+  const video = $('video');
+  const lensChip = $('lensChip');
+  const zoomOutBtn = $('zoomOut');
+  const zoomOneBtn = $('zoomOne');
+  const shutter = $('shutter');
+  const toastEl = $('toast');
+  const sheet = $('sheet');
+  const infoBtn = $('infoBtn');
+
+  const state = {
+    stream: null,
+    track: null,
+    mainId: null,          // deviceId of the 1x wide camera
+    ultraId: null,         // deviceId of the 0.5x ultra-wide camera (once known)
+    candidates: [],        // other back cameras to probe (Android)
+    devices: [],
+    zoom: 1,               // current zoom: 1 or 0.5
+    method: null,          // 'zoom' | 'device' | null
+    busy: false,
+    log: []
+  };
+
+  /* ---------------- helpers ---------------- */
+
+  const log = (msg) => { state.log.push(msg); };
+
+  let toastTimer;
+  function toast(msg, isError = false, ms = 2800) {
+    toastEl.textContent = msg;
+    toastEl.classList.toggle('error', isError);
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), ms);
+  }
+
+  const isBackLabel = (l) => /back|rear|environment|facing back/i.test(l);
+  const isFrontLabel = (l) => /front|user|facing front/i.test(l);
+  const isUltraLabel = (l) => /ultra/i.test(l);
+  const isTeleLabel = (l) => /tele/i.test(l);
+  const isLogicalMulti = (l) => /dual|triple/i.test(l);
+
+  function stopStream() {
+    if (state.stream) state.stream.getTracks().forEach((t) => t.stop());
+    state.stream = null;
+    state.track = null;
+  }
+
+  async function openStream(videoConstraints) {
+    // Android can't hold two cameras open at once, so always release first.
+    stopStream();
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { width: { ideal: 1920 }, height: { ideal: 1080 }, ...videoConstraints }
+    });
+    state.stream = stream;
+    state.track = stream.getVideoTracks()[0];
+    video.srcObject = stream;
+    try { await video.play(); } catch (_) { /* fine once muted + playsinline */ }
+    return state.track;
+  }
+
+  function zoomCaps() {
+    const caps = state.track && state.track.getCapabilities ? state.track.getCapabilities() : {};
+    return caps && caps.zoom ? caps.zoom : null;
+  }
+
+  function currentLabel() {
+    return state.track ? state.track.label || 'Camera' : 'Camera off';
+  }
+
+  function shortLabel(l) { return l.length > 26 ? l.slice(0, 24) + '…' : l; }
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  /* ---------------- UI sync ---------------- */
+
+  function renderUI() {
+    const half = state.zoom === 0.5;
+    zoomOutBtn.setAttribute('aria-pressed', String(half));
+    zoomOneBtn.setAttribute('aria-pressed', String(!half));
+    const ready = !!state.track && !state.busy;
+    zoomOutBtn.disabled = !ready;
+    zoomOneBtn.disabled = !ready;
+    shutter.disabled = !ready;
+
+    lensChip.innerHTML = state.track
+      ? `${half ? '0.5× Ultra-wide' : '1× Wide'}<small>${escapeHtml(shortLabel(currentLabel()))}</small>`
+      : 'Camera off';
+  }
+
+  async function withTransition(fn) {
+    state.busy = true;
+    renderUI();
+    video.classList.add('switching');
+    try {
+      return await fn();
+    } finally {
+      // let the first new frame arrive before fading back in
+      await new Promise((r) => setTimeout(r, 120));
+      video.classList.remove('switching');
+      state.busy = false;
+      renderUI();
+    }
+  }
+
+  /* ---------------- startup (1x wide) ---------------- */
+
+  async function startCamera() {
+    if (!window.isSecureContext) {
+      throw new Error('Camera access needs HTTPS (or localhost). Open this page over https://.');
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error('This browser does not support camera access.');
+    }
+
+    // Default: the main back camera = 1x wide.
+    await openStream({ facingMode: { ideal: 'environment' } });
+    state.mainId = state.track.getSettings().deviceId || null;
+    state.zoom = 1;
+    state.method = null;
+
+    // Labels and the full device list are only available after permission is granted.
+    await refreshDevices();
+
+    // If the default camera is a logical multi-lens device that can already
+    // zoom to 0.5, make sure it opens at exactly 1x.
+    if (zoomCaps()) {
+      try { await state.track.applyConstraints({ advanced: [{ zoom: 1 }] }); } catch (_) {}
+    }
+    renderUI();
+  }
+
+  async function refreshDevices() {
+    const all = await navigator.mediaDevices.enumerateDevices();
+    state.devices = all.filter((d) => d.kind === 'videoinput');
+
+    const others = state.devices.filter((d) => d.deviceId && d.deviceId !== state.mainId);
+
+    // B. a camera that literally says "Ultra Wide"
+    const named = others.find((d) => isUltraLabel(d.label) && !isFrontLabel(d.label));
+    state.ultraId = named ? named.deviceId : null;
+
+    // C. fallback candidates for probing (other back cameras, not tele / logical)
+    state.candidates = others.filter((d) =>
+      !isFrontLabel(d.label) &&
+      (isBackLabel(d.label) || d.label === '') &&
+      !isTeleLabel(d.label) &&
+      !isLogicalMulti(d.label) &&
+      !isUltraLabel(d.label)
+    );
+
+    log(`Main camera: ${state.track.label || '(unnamed)'}`);
+    const z = zoomCaps();
+    log(`Zoom range on main: ${z ? z.min + ' to ' + z.max : 'not exposed'}`);
+    log(`Named ultra-wide: ${named ? named.label : 'none'}`);
+    log(`Probe candidates: ${state.candidates.length}`);
+  }
+
+  /* ---------------- 0.5x (ultra-wide) ---------------- */
+
+  async function goUltraWide() {
+    if (state.zoom === 0.5 || state.busy) return;
+
+    await withTransition(async () => {
+      // A. hardware zoom on the current camera
+      const z = zoomCaps();
+      if (z && z.min <= 0.51) {
+        try {
+          await state.track.applyConstraints({ advanced: [{ zoom: Math.max(0.5, z.min) }] });
+          state.method = 'zoom';
+          state.zoom = 0.5;
+          log('0.5x via hardware zoom');
+          return;
+        } catch (e) { log('Hardware zoom failed: ' + e.name); }
+      }
+
+      // B. a named ultra-wide device
+      if (state.ultraId && (await switchDevice(state.ultraId))) {
+        state.method = 'device';
+        state.zoom = 0.5;
+        log('0.5x via named ultra-wide device');
+        return;
+      }
+
+      // C. probe other back cameras (result is remembered in state.ultraId)
+      if (state.candidates.length) {
+        toast('Looking for the ultra-wide lens…', false, 2000);
+        const id = await probeForUltraWide();
+        if (id && (await switchDevice(id))) {
+          state.ultraId = id;
+          state.method = 'device';
+          state.zoom = 0.5;
+          log('0.5x via probed device');
+          return;
+        }
+      }
+
+      // Nothing worked: make sure we are back on the main lens.
+      await restoreMain();
+      toast('This device doesn’t expose an ultra-wide camera to the browser.', true, 4000);
+    });
+  }
+
+  async function goWide() {
+    if (state.zoom === 1 || state.busy) return;
+
+    await withTransition(async () => {
+      if (state.method === 'zoom') {
+        try {
+          await state.track.applyConstraints({ advanced: [{ zoom: 1 }] });
+          state.zoom = 1;
+          return;
+        } catch (e) { log('Zoom reset failed: ' + e.name); }
+      }
+      await restoreMain();
+    });
+  }
+
+  async function switchDevice(deviceId) {
+    try {
+      await openStream({ deviceId: { exact: deviceId } });
+      return true;
+    } catch (e) {
+      log('Switch failed: ' + e.name);
+      return false;
+    }
+  }
+
+  async function restoreMain() {
+    try {
+      if (state.mainId) await openStream({ deviceId: { exact: state.mainId } });
+      else await openStream({ facingMode: { ideal: 'environment' } });
+    } catch (_) {
+      await openStream({ facingMode: { ideal: 'environment' } });
+    }
+    state.zoom = 1;
+    state.method = null;
+  }
+
+  // Android labels don't say which lens is which, so score each candidate.
+  // Ultra-wide modules are often fixed-focus, unlike the main and tele lenses.
+  async function probeForUltraWide() {
+    let best = null;
+    let bestScore = -1;
+
+    for (const cam of state.candidates) {
+      try {
+        const t = await openStream({ deviceId: { exact: cam.deviceId } });
+        const caps = t.getCapabilities ? t.getCapabilities() : {};
+        let score = 0;
+        if (!('focusDistance' in caps)) score += 2;
+        if (caps.focusMode && !caps.focusMode.includes('continuous')) score += 1;
+        if (caps.zoom && caps.zoom.min <= 0.51) score += 3;
+        log(`Probe ${cam.label || cam.deviceId.slice(0, 8)}: score ${score}`);
+        if (score > bestScore) { bestScore = score; best = cam.deviceId; }
+      } catch (e) {
+        log('Probe error: ' + e.name);
+      }
+    }
+    return best;
+  }
+
+  /* ---------------- photo capture ---------------- */
+
+  function takePhoto() {
+    if (!video.videoWidth) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+
+    const flash = $('flash');
+    flash.classList.remove('go');
+    void flash.offsetWidth;
+    flash.classList.add('go');
+
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `photo-${state.zoom === 0.5 ? '0.5x' : '1x'}-${Date.now()}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    }, 'image/jpeg', 0.92);
+  }
+
+  /* ---------------- details sheet ---------------- */
+
+  function renderSheet() {
+    const items = state.log.map((l) => `<li>${escapeHtml(l)}</li>`).join('');
+    const cams = state.devices
+      .map((d) => `<li>${escapeHtml(d.label || '(no label)')}</li>`)
+      .join('');
+    sheet.innerHTML = `
+      <h2>Active</h2>
+      <ul>
+        <li><span class="tag">Zoom:</span> ${state.zoom === 0.5 ? '0.5×' : '1×'} ${state.method ? '(' + state.method + ')' : ''}</li>
+        <li><span class="tag">Camera:</span> ${escapeHtml(currentLabel())}</li>
+      </ul>
+      <h2 style="margin-top:12px">Cameras the browser sees</h2>
+      <ul>${cams || '<li>None yet</li>'}</ul>
+      <h2 style="margin-top:12px">Log</h2>
+      <ul>${items || '<li>None yet</li>'}</ul>`;
+  }
+
+  /* ---------------- events ---------------- */
+
+  function friendlyError(e) {
+    switch (e && e.name) {
+      case 'NotAllowedError':
+      case 'SecurityError':
+        return 'Camera permission was blocked. Allow camera access in your browser settings, then try again.';
+      case 'NotFoundError':
+        return 'No camera was found on this device.';
+      case 'NotReadableError':
+        return 'The camera is in use by another app. Close it and try again.';
+      default:
+        return e && e.message ? e.message : 'Could not open the camera.';
+    }
+  }
+
+  $('startBtn').addEventListener('click', async () => {
+    const btn = $('startBtn');
+    const err = $('startErr');
+    btn.disabled = true;
+    err.textContent = '';
+    try {
+      await startCamera();
+      $('start').classList.add('hidden');
+    } catch (e) {
+      btn.disabled = false;
+      err.textContent = friendlyError(e);
+    }
+  });
+
+  zoomOutBtn.addEventListener('click', goUltraWide);
+  zoomOneBtn.addEventListener('click', goWide);
+  shutter.addEventListener('click', takePhoto);
+
+  infoBtn.addEventListener('click', () => {
+    renderSheet();
+    const open = sheet.classList.toggle('open');
+    infoBtn.setAttribute('aria-expanded', String(open));
+  });
+
+  // Mobile browsers can kill the camera when the tab is hidden; bring it back.
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState !== 'visible' || !state.stream) return;
+    if (state.track && state.track.readyState !== 'ended') return;
+    const wasHalf = state.zoom === 0.5;
+    try {
+      await restoreMain();
+      renderUI();
+      if (wasHalf) await goUltraWide();
+    } catch (e) {
+      toast(friendlyError(e), true);
+    }
+  });
+
+  renderUI();
+})();
+</script>
+</body>
+</html>
